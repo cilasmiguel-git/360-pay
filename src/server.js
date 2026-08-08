@@ -20,8 +20,14 @@ app.get("/", (req, res) => {
   res.send("API de Pagamentos (AbacatePay) está rodando!");
 });
 
-const PORT = process.env.PORT || 3001;
+// O Vercel define a variável de ambiente VERCEL automaticamente.
+// Se não estivermos na Vercel, iniciamos o servidor ouvindo na porta normalmente.
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => {
+    console.log(`Server running locally on port ${PORT}`);
+  });
+}
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Para a Vercel, precisamos exportar o app Express
+export default app;

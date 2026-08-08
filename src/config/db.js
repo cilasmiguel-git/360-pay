@@ -3,8 +3,18 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-export const userConn = mongoose.createConnection(process.env.MONGODB_URL_USERS);
-export const payConn = mongoose.createConnection(process.env.MONGODB_URL_PAYMENTS);
+// Vercel Connection Caching
+let userConn = global.mongooseUserConn;
+if (!userConn) {
+  userConn = global.mongooseUserConn = mongoose.createConnection(process.env.MONGODB_URL_USERS);
+}
+
+let payConn = global.mongoosePayConn;
+if (!payConn) {
+  payConn = global.mongoosePayConn = mongoose.createConnection(process.env.MONGODB_URL_PAYMENTS);
+}
+
+export { userConn, payConn };
 
 userConn.on('connected', () => console.log(`MongoDB Users Connected: ${userConn.host}`));
 userConn.on('error', (err) => console.error(`Error connecting to Users DB: ${err.message}`));
