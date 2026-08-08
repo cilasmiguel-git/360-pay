@@ -1,0 +1,68 @@
+### Variáveis
+@baseUrl = http://localhost:3001/api/payments
+# Substitua pelos IDs reais do seu banco de dados (MongoDB)
+@userId = 68effb2b61a39f08cda9920a
+@contratoId = 64d9f8e7b1a2c3d4e5f60002
+
+### 1. Testar Status da API (Health Check)
+GET http://localhost:3001/
+
+### 2. Gerar Fatura de Mensalidade Escolar (Avulsa)
+POST {{baseUrl}}/gerar-mensalidade
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "valorBaseMensalidade": 500.00
+}
+
+### 2.1 Gerar Mensalidade Escolar (Assinatura Recorrente)
+POST {{baseUrl}}/gerar-mensalidade
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "valorBaseMensalidade": 500.00,
+  "isRecorrente": true
+}
+
+### 3. Gerar Fatura de Contrato de Serviço
+POST {{baseUrl}}/gerar-contrato
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "contratoId": "{{contratoId}}"
+}
+
+### 4. Gerar Pedido da Lojinha da Escola
+POST {{baseUrl}}/gerar-loja
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "descricaoPedido": "Compra de Fardamento Escolar",
+  "itens": [
+    {
+      "nome": "Camiseta Uniforme Tam M",
+      "preco": 65.00,
+      "quantidade": 2
+    },
+    {
+      "nome": "Agenda Escolar 2026",
+      "preco": 40.00,
+      "quantidade": 1
+    }
+  ]
+}
+
+### 5. Simular Recebimento de Webhook (AbacatePay)
+POST {{baseUrl}}/webhook
+Content-Type: application/json
+
+{
+  "type": "checkout.paid",
+  "data": {
+    "id": "ID_DO_CHECKOUT_GERADO_NOS_TESTES_ACIMA"
+  }
+}
