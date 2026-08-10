@@ -9,27 +9,41 @@ const connOptions = {
 
 // Vercel Connection Caching
 let userConn = global.mongooseUserConn;
-if (!userConn) {
-  if (!process.env.MONGODB_URL_USERS) {
-    console.error("❌ MONGODB_URL_USERS não definida nas variáveis de ambiente!");
-  }
+if (!userConn && process.env.MONGODB_URL_USERS) {
   userConn = global.mongooseUserConn = mongoose.createConnection(process.env.MONGODB_URL_USERS, connOptions);
 }
 
 let payConn = global.mongoosePayConn;
-if (!payConn) {
-  if (!process.env.MONGODB_URL_PAYMENTS) {
-    console.error("❌ MONGODB_URL_PAYMENTS não definida nas variáveis de ambiente!");
-  }
+if (!payConn && process.env.MONGODB_URL_PAYMENTS) {
   payConn = global.mongoosePayConn = mongoose.createConnection(process.env.MONGODB_URL_PAYMENTS, connOptions);
 }
 
 export const ensureDbConnected = async (req, res, next) => {
   try {
-    if (userConn.readyState !== 1) {
+    const missing = [];
+    if (!process.env.MONGODB_URL_USERS) missing.push("MONGODB_URL_USERS");
+    if (!process.env.MONGODB_URL_PAYMENTS) missing.push("MONGODB_URL_PAYMENTS");
+
+    if (missing.length > 0) {
+      if (res) {
+        return res.status(500).json({
+          error: "Variável de ambiente ausente no servidor (Vercel)",
+          details: `As seguintes variáveis não foram encontradas na Vercel: ${missing.join(", ")}. Adicione-as em Settings -> Environment Variables.`
+        });
+      }
+    }
+
+    if (!userConn && process.env.MONGODB_URL_USERS) {
+      userConn = global.mongooseUserConn = mongoose.createConnection(process.env.MONGODB_URL_USERS, connOptions);
+    }
+    if (!payConn && process.env.MONGODB_URL_PAYMENTS) {
+      payConn = global.mongoosePayConn = mongoose.createConnection(process.env.MONGODB_URL_PAYMENTS, connOptions);
+    }
+
+    if (userConn && userConn.readyState !== 1) {
       await userConn.asPromise();
     }
-    if (payConn.readyState !== 1) {
+    if (payConn && payConn.readyState !== 1) {
       await payConn.asPromise();
     }
     if (next) next();
@@ -41,9 +55,14 @@ export const ensureDbConnected = async (req, res, next) => {
 
 export { userConn, payConn };
 
-userConn.on('connected', () => console.log(`MongoDB Users Connected: ${userConn.host}`));
-userConn.on('error', (err) => console.error(`Error connecting to Users DB: ${err.message}`));
+if (userConn) {
+  userConn.on('connected', () => console.log(`MongoDB Users Connected: ${userConn.host}`));
+  userConn.on('error', (err) => console.error(`Error connecting to Users DB: ${err.message}`));
+}
 
-payConn.on('connected', () => console.log(`MongoDB Payments Connected: ${payConn.host}`));
-payConn.on('error', (err) => console.error(`Error connecting to Payments DB: ${err.message}`));
+if (payConn) {
+  payConn.on('connected', () => console.log(`MongoDB Payments Connected: ${payConn.host}`));
+  payConn.on('error', (err) => console.error(`Error connecting to Payments DB: ${err.message}`));
+}
+
 
