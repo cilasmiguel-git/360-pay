@@ -35,7 +35,7 @@ export const ensureDbConnected = async (req, res, next) => {
     if (next) next();
   } catch (err) {
     console.error("Erro ao conectar no banco de dados:", err);
-    if (res) return res.status(500).json({ error: "Erro de conexão com o banco de dados" });
+    if (res) return res.status(500).json({ error: "Erro de conexão com o banco de dados", details: err.message });
   }
 };
 
