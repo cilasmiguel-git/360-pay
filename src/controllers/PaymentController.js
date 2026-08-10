@@ -13,6 +13,36 @@ const getAbacate = () => {
   return AbacatePay({ secret: process.env.ABACATEPAY_API_KEY });
 };
 
+// Converte os dados do usuário para o formato exigido pela AbacatePay (taxId e cellphone)
+const buildCustomerPayload = (user = {}, customCustomer = {}) => {
+  const name = (customCustomer.name || `${user.firstName || ''} ${user.lastName || ''}`).trim();
+  const email = (customCustomer.email || user.email || '').trim();
+
+  // Limpa caracteres não numéricos do CPF/CNPJ e Telefone
+  const rawCpf = String(customCustomer.taxId || customCustomer.cpf || user.CPF || '').replace(/\D/g, '');
+  const rawPhone = String(customCustomer.cellphone || customCustomer.phone || user.phoneNumber || '').replace(/\D/g, '');
+
+  // A SDK da AbacatePay v2 EXIGE que se o objeto 'customer' for enviado no checkout,
+  // TODOS os 4 campos (name, email, taxId, cellphone) sejam válidos e preenchidos.
+  if (name && email && rawCpf && rawPhone) {
+    return {
+      name,
+      email,
+      taxId: rawCpf,
+      cellphone: rawPhone
+    };
+  }
+
+  console.warn("⚠️ Dados do cliente incompletos para pré-preenchimento automático na AbacatePay:", {
+    name: name || "FALTANDO",
+    email: email || "FALTANDO",
+    taxId: rawCpf || "FALTANDO",
+    cellphone: rawPhone || "FALTANDO"
+  });
+
+  return undefined;
+};
+
 export const gerarMensalidade = async (req, res) => {
   try {
     const { userId, valorBaseMensalidade, isRecorrente } = req.body;
@@ -52,12 +82,7 @@ export const gerarMensalidade = async (req, res) => {
     let transactionId = '';
     let transactionUrl = '';
 
-    const customerPayload = {
-      email: user.email || 'nao-informado@escola.com',
-      name: `${user.firstName} ${user.lastName}`,
-      cpf: user.CPF || null,
-      phone: user.phoneNumber || null
-    };
+    const customerPayload = buildCustomerPayload(user);
 
     if (isRecorrente) {
       // 2. Cria a Assinatura vinculando o Produto
@@ -156,12 +181,7 @@ export const gerarContrato = async (req, res) => {
     let transactionId = '';
     let transactionUrl = '';
 
-    const customerPayload = {
-      email: user.email || 'nao-informado@escola.com',
-      name: `${user.firstName} ${user.lastName}`,
-      cpf: user.CPF || null,
-      phone: user.phoneNumber || null
-    };
+    const customerPayload = buildCustomerPayload(user);
 
     if (isRecorrente) {
       const subscription = await abacate.subscriptions.create({
@@ -219,7 +239,7 @@ export const gerarContrato = async (req, res) => {
 
 export const gerarPedidoLoja = async (req, res) => {
   try {
-    const { userId, descricaoPedido, itens } = req.body;
+    const { userId, descricaoPedido, itens, customer: customCustomer } = req.body;
 
     const user = await User.findById(userId);
     if (!user) {
@@ -247,14 +267,11 @@ export const gerarPedidoLoja = async (req, res) => {
       return res.status(500).json({ error: 'Erro ao criar pedido no AbacatePay', details: produto.error });
     }
 
+    const customerPayload = buildCustomerPayload(user, customCustomer);
+
     const checkout = await abacate.checkouts.create({
       items: [{ id: produto.data.id, quantity: 1 }],
-      customer: {
-        email: user.email || 'nao-informado@escola.com',
-        name: `${user.firstName} ${user.lastName}`,
-        cpf: user.CPF || null,
-        phone: user.phoneNumber || null
-      }
+      customer: customerPayload
     });
 
     if (!checkout.success) {
