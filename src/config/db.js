@@ -4,8 +4,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const connOptions = {
-  serverSelectionTimeoutMS: 5000,
-  bufferCommands: false // Desativa o buffering infinito se não estiver conectado
+  serverSelectionTimeoutMS: 10000,
 };
 
 // Vercel Connection Caching
@@ -24,6 +23,21 @@ if (!payConn) {
   }
   payConn = global.mongoosePayConn = mongoose.createConnection(process.env.MONGODB_URL_PAYMENTS, connOptions);
 }
+
+export const ensureDbConnected = async (req, res, next) => {
+  try {
+    if (userConn.readyState !== 1) {
+      await userConn.asPromise();
+    }
+    if (payConn.readyState !== 1) {
+      await payConn.asPromise();
+    }
+    if (next) next();
+  } catch (err) {
+    console.error("Erro ao conectar no banco de dados:", err);
+    if (res) return res.status(500).json({ error: "Erro de conexão com o banco de dados" });
+  }
+};
 
 export { userConn, payConn };
 
