@@ -10,18 +10,22 @@ const connOptions = {
   serverSelectionTimeoutMS: 5000, // Fala rápido (5s) em caso de oscilação em vez de pendurar a requisição
   socketTimeoutMS: 45000,          // Fecha sockets inativos automaticamente
   connectTimeoutMS: 10000,
+  bufferCommands: false,          // Evita que queries fiquem travadas por 10s se o DB estiver desconectado
 };
 
-// Caching de Conexões para Vercel
-let userConn = global.mongooseUserConn;
-if (!userConn && process.env.MONGODB_URL_USERS) {
-  userConn = global.mongooseUserConn = mongoose.createConnection(process.env.MONGODB_URL_USERS, connOptions);
+// Caching estático das conexões no escopo global (Vercel Serverless)
+// As conexões são instanciadas UMA ÚNICA VEZ e nunca recriadas/zeradas,
+// garantindo que os Models (User, Fatura) nunca percam a referência da conexão.
+if (!global.mongooseUserConn && process.env.MONGODB_URL_USERS) {
+  global.mongooseUserConn = mongoose.createConnection(process.env.MONGODB_URL_USERS, connOptions);
 }
 
-let payConn = global.mongoosePayConn;
-if (!payConn && process.env.MONGODB_URL_PAYMENTS) {
-  payConn = global.mongoosePayConn = mongoose.createConnection(process.env.MONGODB_URL_PAYMENTS, connOptions);
+if (!global.mongoosePayConn && process.env.MONGODB_URL_PAYMENTS) {
+  global.mongoosePayConn = mongoose.createConnection(process.env.MONGODB_URL_PAYMENTS, connOptions);
 }
+
+export const userConn = global.mongooseUserConn;
+export const payConn = global.mongoosePayConn;
 
 export const ensureDbConnected = async (req, res, next) => {
   try {
@@ -38,31 +42,24 @@ export const ensureDbConnected = async (req, res, next) => {
       }
     }
 
-    if (!userConn || userConn.readyState === 0 || userConn.readyState === 3) {
-      userConn = global.mongooseUserConn = mongoose.createConnection(process.env.MONGODB_URL_USERS, connOptions);
+    const promises = [];
+    if (userConn && userConn.readyState !== 1) {
+      promises.push(userConn.asPromise());
     }
-    if (!payConn || payConn.readyState === 0 || payConn.readyState === 3) {
-      payConn = global.mongoosePayConn = mongoose.createConnection(process.env.MONGODB_URL_PAYMENTS, connOptions);
+    if (payConn && payConn.readyState !== 1) {
+      promises.push(payConn.asPromise());
     }
 
-    // Conecta em paralelo aos dois bancos para acelerar o Cold Start
-    await Promise.all([
-      userConn.readyState === 1 ? Promise.resolve() : userConn.asPromise(),
-      payConn.readyState === 1 ? Promise.resolve() : payConn.asPromise()
-    ]);
+    if (promises.length > 0) {
+      await Promise.all(promises);
+    }
 
     if (next) next();
   } catch (err) {
-    global.mongooseUserConn = null;
-    global.mongoosePayConn = null;
-    userConn = null;
-    payConn = null;
     console.error("Erro ao conectar no banco de dados:", err);
     if (res) return res.status(500).json({ error: "Erro de conexão com o banco de dados", details: err.message });
   }
 };
-
-export { userConn, payConn };
 
 if (userConn) {
   userConn.on('connected', () => console.log(`MongoDB Users Connected: ${userConn.host}`));
