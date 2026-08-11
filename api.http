@@ -7,6 +7,17 @@
 ### 1. Testar Status da API (Health Check)
 GET http://localhost:3001/
 
+### 1.1 Criar/Obter Cliente no AbacatePay diretamente
+POST {{baseUrl}}/criar-cliente
+Content-Type: application/json
+
+{
+  "name": "Nome do Cliente",
+  "email": "cliente@email.com",
+  "taxId": "12345678909",
+  "cellphone": "85999999999"
+}
+
 ### 2. Gerar Fatura de Mensalidade Escolar (Avulsa)
 POST {{baseUrl}}/gerar-mensalidade
 Content-Type: application/json
