@@ -170,6 +170,8 @@ const userSchema = new mongoose.Schema({
   resetPasswordToken: { type: String },
   resetPasswordExpires: { type: Date },
 
+  abacateCustomerId: { type: String, sparse: true },
+
   matricula: { type: String, unique: true, sparse: true },
 
   endereco: {

@@ -15,6 +15,12 @@ const getAbacate = () => {
 
 // Obtém ou cria o cliente no AbacatePay (via /customers/create) para obter o customerId oficial
 const getOrCreateAbacateCustomer = async (abacate, user = {}, customCustomer = {}) => {
+  const existingCustomerId = customCustomer.customerId || customCustomer.abacateCustomerId || user.abacateCustomerId;
+  if (existingCustomerId) {
+    console.log(`✅ [AbacatePay] Usando customerId pré-existente: ${existingCustomerId}`);
+    return { customerId: existingCustomerId, customerPayload: undefined };
+  }
+
   const rawName = customCustomer.name || customCustomer.nome || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.name || user.nome || (customCustomer.email || user.email ? (customCustomer.email || user.email).split('@')[0] : 'Cliente');
   const name = String(rawName).trim();
   const email = String(customCustomer.email || user.email || '').trim();
@@ -40,20 +46,27 @@ const getOrCreateAbacateCustomer = async (abacate, user = {}, customCustomer = {
     cellphone: rawPhone
   };
 
+  let lastError = null;
   try {
     // A API v2 do AbacatePay pré-preenche o checkout vinculando o ID do cliente retornado em /customers/create
     const customerRes = await abacate.customers.create(customerPayload);
     if (customerRes && customerRes.success && customerRes.data?.id) {
       console.log(`✅ [AbacatePay] Cliente registrado/obtido com sucesso! Customer ID: ${customerRes.data.id}`);
+      if (user && user._id && typeof user.save === 'function') {
+        user.abacateCustomerId = customerRes.data.id;
+        await user.save().catch(e => console.warn('Aviso ao salvar abacateCustomerId no user:', e.message));
+      }
       return { customerId: customerRes.data.id, customerPayload };
     } else {
-      console.warn(`⚠️ [AbacatePay] Aviso ao criar cliente em /customers/create:`, customerRes?.error || customerRes);
+      lastError = typeof customerRes?.error === 'string' ? customerRes.error : JSON.stringify(customerRes?.error || customerRes);
+      console.warn(`⚠️ [AbacatePay] Aviso ao criar cliente em /customers/create:`, lastError);
     }
   } catch (err) {
+    lastError = err.message;
     console.error(`⚠️ [AbacatePay] Exceção ao registrar cliente:`, err.message);
   }
 
-  return { customerId: undefined, customerPayload };
+  return { customerId: undefined, customerPayload, errorDetails: lastError };
 };
 
 export const criarClienteAbacate = async (req, res) => {
@@ -73,13 +86,18 @@ export const criarClienteAbacate = async (req, res) => {
     };
 
     const abacate = getAbacate();
-    const { customerId, customerPayload } = await getOrCreateAbacateCustomer(abacate, user || {}, customCustomer);
+    const { customerId, customerPayload, errorDetails } = await getOrCreateAbacateCustomer(abacate, user || {}, customCustomer);
 
     if (!customerId) {
       return res.status(400).json({
         error: "Falha ao registrar cliente no AbacatePay.",
-        details: "Verifique se Nome, Email, CPF (válido com dígitos de controle) e Celular com DDD foram fornecidos."
+        details: errorDetails || "Verifique se Nome, Email, CPF (válido com dígitos de controle) e Celular com DDD foram fornecidos."
       });
+    }
+
+    if (user && customerId) {
+      user.abacateCustomerId = customerId;
+      await user.save().catch(e => console.warn('Aviso ao salvar abacateCustomerId:', e.message));
     }
 
     return res.status(201).json({
