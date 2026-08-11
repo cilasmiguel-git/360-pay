@@ -3,11 +3,16 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// Opções de conexão altamente otimizadas para ambiente Serverless (Vercel)
 const connOptions = {
-  serverSelectionTimeoutMS: 10000,
+  maxPoolSize: 10,                // Limita sockets por instância Serverless (evita estourar limite do Atlas)
+  minPoolSize: 0,                 // Não mantém sockets ociosos no congelamento da função
+  serverSelectionTimeoutMS: 5000, // Fala rápido (5s) em caso de oscilação em vez de pendurar a requisição
+  socketTimeoutMS: 45000,          // Fecha sockets inativos automaticamente
+  connectTimeoutMS: 10000,
 };
 
-// Vercel Connection Caching
+// Caching de Conexões para Vercel
 let userConn = global.mongooseUserConn;
 if (!userConn && process.env.MONGODB_URL_USERS) {
   userConn = global.mongooseUserConn = mongoose.createConnection(process.env.MONGODB_URL_USERS, connOptions);
@@ -33,21 +38,25 @@ export const ensureDbConnected = async (req, res, next) => {
       }
     }
 
-    if (!userConn && process.env.MONGODB_URL_USERS) {
+    if (!userConn || userConn.readyState === 0 || userConn.readyState === 3) {
       userConn = global.mongooseUserConn = mongoose.createConnection(process.env.MONGODB_URL_USERS, connOptions);
     }
-    if (!payConn && process.env.MONGODB_URL_PAYMENTS) {
+    if (!payConn || payConn.readyState === 0 || payConn.readyState === 3) {
       payConn = global.mongoosePayConn = mongoose.createConnection(process.env.MONGODB_URL_PAYMENTS, connOptions);
     }
 
-    if (userConn && userConn.readyState !== 1) {
-      await userConn.asPromise();
-    }
-    if (payConn && payConn.readyState !== 1) {
-      await payConn.asPromise();
-    }
+    // Conecta em paralelo aos dois bancos para acelerar o Cold Start
+    await Promise.all([
+      userConn.readyState === 1 ? Promise.resolve() : userConn.asPromise(),
+      payConn.readyState === 1 ? Promise.resolve() : payConn.asPromise()
+    ]);
+
     if (next) next();
   } catch (err) {
+    global.mongooseUserConn = null;
+    global.mongoosePayConn = null;
+    userConn = null;
+    payConn = null;
     console.error("Erro ao conectar no banco de dados:", err);
     if (res) return res.status(500).json({ error: "Erro de conexão com o banco de dados", details: err.message });
   }

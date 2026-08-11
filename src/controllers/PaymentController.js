@@ -15,8 +15,9 @@ const getAbacate = () => {
 
 // Converte os dados do usuário para o formato exigido pela AbacatePay (taxId e cellphone)
 const buildCustomerPayload = (user = {}, customCustomer = {}) => {
-  const name = (customCustomer.name || `${user.firstName || ''} ${user.lastName || ''}`).trim();
-  const email = (customCustomer.email || user.email || '').trim();
+  const rawName = customCustomer.name || customCustomer.nome || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.name || user.nome || (customCustomer.email || user.email ? (customCustomer.email || user.email).split('@')[0] : 'Cliente');
+  const name = String(rawName).trim();
+  const email = String(customCustomer.email || user.email || 'cliente@escola.com').trim();
 
   // Limpa caracteres não numéricos do CPF/CNPJ e Telefone
   const rawCpf = String(customCustomer.taxId || customCustomer.cpf || user.CPF || '').replace(/\D/g, '');
