@@ -13,6 +13,7 @@
   "type": "module",
   "dependencies": {
     "@abacatepay/sdk": "^2.0.3",
+    "@upstash/qstash": "^2.11.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
