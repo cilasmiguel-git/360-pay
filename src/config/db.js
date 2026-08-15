@@ -43,17 +43,22 @@ export const ensureDbConnected = async (req, res, next) => {
       }
     }
 
-    const promises = [];
-    if (userConn && userConn.readyState !== 1) {
-      promises.push(userConn.asPromise());
-    }
-    if (payConn && payConn.readyState !== 1) {
-      promises.push(payConn.asPromise());
-    }
+    const connectOrWait = async (conn, url) => {
+      if (!conn) return;
+      // Se a conexão foi fechada ou caiu (readyState === 0), força a reconexão no mesmo objeto
+      if (conn.readyState === 0) {
+        console.log(`[DB] Reabrindo conexão com o banco de dados (${conn.name || 'DB'})...`);
+        await conn.openUri(url, connOptions);
+      } else if (conn.readyState !== 1) {
+        // Se está em processo de conexão (readyState === 2), aguarda a promessa
+        await conn.asPromise();
+      }
+    };
 
-    if (promises.length > 0) {
-      await Promise.all(promises);
-    }
+    await Promise.all([
+      connectOrWait(userConn, process.env.MONGODB_URL_USERS),
+      connectOrWait(payConn, process.env.MONGODB_URL_PAYMENTS)
+    ]);
 
     if (next) next();
   } catch (err) {
