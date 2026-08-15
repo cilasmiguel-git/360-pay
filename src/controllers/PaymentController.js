@@ -412,6 +412,13 @@ export const gerarPedidoLoja = async (req, res) => {
 
     const abacate = getAbacate();
 
+    console.log("📥 [gerarPedidoLoja] Requisição de checkout recebida:", {
+      userId,
+      customCustomer,
+      methods,
+      itensCount: itens?.length
+    });
+
     const produto = await abacate.products.create({
       externalId: `loja_${user._id}_${Date.now()}`,
       name: descricaoPedido || 'Pedido Lojinha',
@@ -421,10 +428,16 @@ export const gerarPedidoLoja = async (req, res) => {
     });
 
     if (!produto.success) {
+      console.error("❌ [AbacatePay] Erro ao criar produto:", produto.error);
       return res.status(500).json({ error: 'Erro ao criar pedido no AbacatePay', details: produto.error });
     }
 
     const { customerId, customerPayload } = await getOrCreateAbacateCustomer(abacate, user, customCustomer);
+
+    console.log("👤 [AbacatePay] Dados do cliente resolvidos para pré-preenchimento:", {
+      customerId,
+      customerPayload
+    });
 
     const chkBody = {
       items: [{ id: produto.data.id, quantity: 1 }]
@@ -432,8 +445,18 @@ export const gerarPedidoLoja = async (req, res) => {
     if (methods && Array.isArray(methods) && methods.length > 0) {
       chkBody.methods = methods;
     }
-    if (customerId) chkBody.customerId = customerId;
-    else if (customerPayload) chkBody.customer = customerPayload;
+
+    // Se temos o customerId, usamos ele. Além disso, se temos dados completos do cliente, passamos o objeto customer para garantir o pré-preenchimento e pular a tela de dados no AbacatePay!
+    if (customerId) {
+      chkBody.customerId = customerId;
+    }
+    if (customerPayload && customerPayload.taxId && customerPayload.cellphone) {
+      chkBody.customer = customerPayload;
+    } else if (!customerId && customerPayload) {
+      chkBody.customer = customerPayload;
+    }
+
+    console.log("📦 [AbacatePay] Enviando chkBody para a API do AbacatePay:", JSON.stringify(chkBody, null, 2));
 
     let checkout = await abacate.checkouts.create(chkBody);
 
@@ -441,7 +464,7 @@ export const gerarPedidoLoja = async (req, res) => {
     if (!checkout.success && chkBody.customerId && customerPayload) {
       const errDetail = typeof checkout.error === 'string' ? checkout.error : JSON.stringify(checkout.error || '');
       if (errDetail.toLowerCase().includes('customer not found') || errDetail.toLowerCase().includes('not found')) {
-        console.warn(`⚠️ [AbacatePay] customerId '${chkBody.customerId}' não encontrado no AbacatePay. Recriando checkout com payload completo do cliente...`);
+        console.warn(`⚠️ [AbacatePay] customerId '${chkBody.customerId}' não encontrado no AbacatePay. Recriando checkout apenas com o payload do cliente...`);
         delete chkBody.customerId;
         chkBody.customer = customerPayload;
         checkout = await abacate.checkouts.create(chkBody);
@@ -449,8 +472,11 @@ export const gerarPedidoLoja = async (req, res) => {
     }
 
     if (!checkout.success) {
+      console.error("❌ [AbacatePay] Erro final ao gerar checkout:", checkout.error);
       return res.status(500).json({ error: 'Erro ao gerar checkout da lojinha', details: checkout.error });
     }
+
+    console.log("✅ [AbacatePay] Checkout gerado com SUCESSO! URL:", checkout.data?.url);
 
     const fatura = new Fatura({
       usuarioId: user._id,
