@@ -367,6 +367,17 @@ export const gerarContrato = async (req, res) => {
   }
 };
 
+/**
+ * Taxa cobrada pelo gateway AbacatePay (3,5%)
+ * Fórmula de Gross-Up: ValorFinal = ValorBase / (1 - 0,035)
+ * Garantindo que, após a dedução de 3,5%, a loja receba 100% do valor base.
+ */
+export const calcularValorComTaxaAbacate = (valorBase, feePercentage = 3.5) => {
+  if (!valorBase || valorBase <= 0) return 0;
+  const rate = feePercentage / 100;
+  return valorBase / (1 - rate);
+};
+
 export const gerarPedidoLoja = async (req, res) => {
   try {
     const { userId, descricaoPedido, itens, customer: customCustomer, methods } = req.body;
@@ -381,7 +392,9 @@ export const gerarPedidoLoja = async (req, res) => {
     }
 
     const valorTotal = itens.reduce((acc, item) => acc + (item.preco * item.quantidade), 0);
-    const valorCentavos = Math.round(valorTotal * 100);
+    // Repasse da taxa de 3,5% do AbacatePay via cálculo proporcional (Gross-Up)
+    const valorComTaxa = calcularValorComTaxaAbacate(valorTotal, 3.5);
+    const valorCentavos = Math.round(valorComTaxa * 100);
 
     const abacate = getAbacate();
 
@@ -468,7 +481,7 @@ export const gerarPedidoLoja = async (req, res) => {
       origemCobranca: 'loja',
       descricao: descricaoPedido || 'Pedido Lojinha',
       valorOriginal: valorTotal,
-      valorComDesconto: valorTotal,
+      valorComDesconto: Number(valorComTaxa.toFixed(2)),
       vencimento: new Date(new Date().setDate(new Date().getDate() + 3)), // Vence em 3 dias
       tenantId: user.tenantId,
       status: 'PENDING',
