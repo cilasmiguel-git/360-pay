@@ -387,7 +387,7 @@ export const gerarContrato = async (req, res) => {
 
 export const gerarPedidoLoja = async (req, res) => {
   try {
-    const { userId, descricaoPedido, itens, customer: customCustomer } = req.body;
+    const { userId, descricaoPedido, itens, customer: customCustomer, methods } = req.body;
 
     const user = await User.findById(userId);
     if (!user) {
@@ -420,6 +420,9 @@ export const gerarPedidoLoja = async (req, res) => {
     const chkBody = {
       items: [{ id: produto.data.id, quantity: 1 }]
     };
+    if (methods && Array.isArray(methods) && methods.length > 0) {
+      chkBody.methods = methods;
+    }
     if (customerId) chkBody.customerId = customerId;
     else if (customerPayload) chkBody.customer = customerPayload;
 
