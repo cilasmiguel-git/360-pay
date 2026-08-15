@@ -444,19 +444,13 @@ export const gerarPedidoLoja = async (req, res) => {
       }
     }
 
-    // Fallback 2: Se o método Cartão (CARD) solo não estiver liberado pela API do AbacatePay na conta, tenta recriar com ["PIX", "CARD"] e depois sem restrição de método
+    // Fallback 2: Se o método Cartão (CARD) não estiver liberado na conta do AbacatePay da loja, remove o filtro de métodos para garantir a geração do checkout
     if (!checkout.success && chkBody.methods && chkBody.methods.includes("CARD")) {
       const errDetail = typeof checkout.error === 'string' ? checkout.error : JSON.stringify(checkout.error || '');
       if (errDetail.toLowerCase().includes('card is not available') || errDetail.toLowerCase().includes('not available')) {
-        console.warn(`⚠️ [AbacatePay] Cartão solo (CARD) recusado pela API. Tentando checkout combinado ["PIX", "CARD"]...`);
-        chkBody.methods = ["PIX", "CARD"];
+        console.warn(`⚠️ [AbacatePay] O método Cartão (CARD) não está liberado para esta loja no AbacatePay. Recriando checkout com as formas ativas da conta...`);
+        delete chkBody.methods;
         checkout = await abacate.checkouts.create(chkBody);
-        
-        if (!checkout.success) {
-          console.warn(`⚠️ [AbacatePay] Nova tentativa sem filtro de métodos para garantir o checkout...`);
-          delete chkBody.methods;
-          checkout = await abacate.checkouts.create(chkBody);
-        }
       }
     }
 
