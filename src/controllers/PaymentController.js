@@ -433,13 +433,23 @@ export const gerarPedidoLoja = async (req, res) => {
 
     let checkout = await abacate.checkouts.create(chkBody);
 
-    // Fallback de segurança: Se o customerId salvo no banco não existir no AbacatePay (ex: chave de API ou ambiente alterado), tenta recriar com os dados do cliente
+    // Fallback 1: Se o customerId salvo no banco não existir no AbacatePay (ex: chave de API ou ambiente alterado), tenta recriar com os dados do cliente
     if (!checkout.success && chkBody.customerId && customerPayload) {
       const errDetail = typeof checkout.error === 'string' ? checkout.error : JSON.stringify(checkout.error || '');
       if (errDetail.toLowerCase().includes('customer not found') || errDetail.toLowerCase().includes('not found')) {
         console.warn(`⚠️ [AbacatePay] customerId '${chkBody.customerId}' não encontrado no AbacatePay. Recriando checkout apenas com o payload do cliente...`);
         delete chkBody.customerId;
         chkBody.customer = customerPayload;
+        checkout = await abacate.checkouts.create(chkBody);
+      }
+    }
+
+    // Fallback 2: Se o método Cartão (CARD) não estiver ativado no painel do AbacatePay da loja, remove a restrição para permitir o checkout
+    if (!checkout.success && chkBody.methods && chkBody.methods.includes("CARD")) {
+      const errDetail = typeof checkout.error === 'string' ? checkout.error : JSON.stringify(checkout.error || '');
+      if (errDetail.toLowerCase().includes('card is not available') || errDetail.toLowerCase().includes('not available')) {
+        console.warn(`⚠️ [AbacatePay] O método Cartão (CARD) ainda não está ativado no painel do AbacatePay. Gerando checkout com métodos disponíveis...`);
+        delete chkBody.methods;
         checkout = await abacate.checkouts.create(chkBody);
       }
     }

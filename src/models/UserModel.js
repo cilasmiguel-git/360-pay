@@ -232,16 +232,16 @@ userSchema.pre("save", function (next) {
       return next(new Error("No desconto do devedor: 'inicio' não pode ser maior que 'fim'."));
   }
 
-  (this.contratosServicos || []).forEach((c) => {
+  for (const c of (this.contratosServicos || [])) {
     const dc = c.descontoDevedor;
-    if (!dc) return;
+    if (!dc) continue;
     if (dc.tipo === "percentual" && (typeof dc.valor !== "number" || dc.valor < 0 || dc.valor > 100))
       return next(new Error("No contrato: para desconto percentual, 'valor' deve estar entre 0 e 100."));
     if (dc.tipo === "valor" && (typeof dc.valor !== "number" || dc.valor < 0))
       return next(new Error("No contrato: para desconto em valor, 'valor' deve ser >= 0."));
     if (dc.inicio && dc.fim && dc.inicio > dc.fim)
       return next(new Error("No contrato: 'inicio' não pode ser maior que 'fim'."));
-  });
+  }
 
   next();
 });
