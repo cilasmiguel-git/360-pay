@@ -13,7 +13,7 @@ const getAbacate = () => {
   return AbacatePay({ secret: process.env.ABACATEPAY_API_KEY });
 };
 
-// Obtém ou cria o cliente no AbacatePay (via /customers/create) para obter o customerId oficial
+// Obtém, valida ou cria o cliente no AbacatePay (via /customers/list e /customers/create)
 const getOrCreateAbacateCustomer = async (abacate, user = {}, customCustomer = {}) => {
   let existingCustomerId = customCustomer.customerId || customCustomer.abacateCustomerId || user.abacateCustomerId;
 
@@ -32,99 +32,72 @@ const getOrCreateAbacateCustomer = async (abacate, user = {}, customCustomer = {
     cellphone: rawPhone
   };
 
-  // 1. Se já possui ID direto do cliente
-  if (existingCustomerId) {
-    console.log(`✅ [AbacatePay] Usando customerId pré-existente: ${existingCustomerId}`);
-    return { customerId: existingCustomerId, customerPayload, isExisting: true };
-  }
-
-  // 2. Tenta buscar no banco de dados local (User) se já existe um cadastro com este E-mail ou CPF que tenha abacateCustomerId
-  if ((email || rawCpf) && User && typeof User.findOne === 'function') {
-    try {
-      const dbUser = await User.findOne({
-        $or: [
-          ...(email ? [{ email }] : []),
-          ...(rawCpf ? [{ CPF: rawCpf }] : [])
-        ]
-      }).catch(() => null);
-      if (dbUser?.abacateCustomerId) {
-        console.log(`✅ [AbacatePay] Encontrado abacateCustomerId pré-existente no DB local: ${dbUser.abacateCustomerId}`);
-        return { customerId: dbUser.abacateCustomerId, customerPayload, isExisting: true };
-      }
-    } catch (dbErr) {
-      console.warn("⚠️ Aviso ao buscar usuário existente no DB:", dbErr.message);
-    }
-  }
-
-  if (!name || !email || !rawCpf || !rawPhone) {
-    console.warn("⚠️ [AbacatePay] Dados do cliente incompletos para pré-preenchimento automático:", {
-      name: name || "FALTANDO",
-      email: email || "FALTANDO",
-      taxId: rawCpf || "FALTANDO",
-      cellphone: rawPhone || "FALTANDO"
-    });
-    return { customerId: undefined, customerPayload: undefined, isExisting: false };
-  }
-
-  let lastError = null;
-
-  // 3. Tenta consultar na API do AbacatePay se o cliente já existe por CPF/TaxId ou Email
+  // 1. Consulta ativamente no AbacatePay se o cliente (ID, CPF ou E-mail) realmente existe na conta atual
   try {
     if (abacate.customers && typeof abacate.customers.list === 'function') {
-      try {
-        const listRes = await abacate.customers.list();
-        if (listRes?.success && Array.isArray(listRes.data)) {
-          const matched = listRes.data.find(c =>
-            (c.taxId && c.taxId.replace(/\D/g, '') === rawCpf) ||
-            (c.email && c.email.toLowerCase() === email.toLowerCase())
-          );
-          if (matched && matched.id) {
-            console.log(`✅ [AbacatePay] Cliente já existente retornado da lista do AbacatePay: ${matched.id}`);
-            return {
-              customerId: matched.id,
-              customerPayload: {
-                name: matched.name || name,
-                email: matched.email || email,
-                taxId: matched.taxId ? matched.taxId.replace(/\D/g, '') : rawCpf,
-                cellphone: matched.cellphone ? matched.cellphone.replace(/\D/g, '') : rawPhone
-              },
-              isExisting: true
-            };
+      const listRes = await abacate.customers.list().catch(() => null);
+      if (listRes?.success && Array.isArray(listRes.data)) {
+        const matched = listRes.data.find(c =>
+          (existingCustomerId && c.id === existingCustomerId) ||
+          (rawCpf && c.taxId && c.taxId.replace(/\D/g, '') === rawCpf) ||
+          (email && c.email && c.email.toLowerCase() === email.toLowerCase())
+        );
+
+        if (matched && matched.id) {
+          console.log(`✅ [AbacatePay] Cliente validado com sucesso na API do AbacatePay: ${matched.id}`);
+          if (user && user._id && user.abacateCustomerId !== matched.id && typeof user.save === 'function') {
+            user.abacateCustomerId = matched.id;
+            await user.save().catch(e => console.warn('Aviso ao salvar abacateCustomerId:', e.message));
           }
-        }
-      } catch (listErr) {
-        console.warn(`⚠️ [AbacatePay] Aviso ao listar clientes no AbacatePay:`, listErr.message);
-      }
-    }
-
-    // 4. Se não encontrou cliente pré-existente, tenta criar um novo
-    const customerRes = await abacate.customers.create(customerPayload);
-    if (customerRes && customerRes.success && customerRes.data?.id) {
-      console.log(`✅ [AbacatePay] Cliente registrado com sucesso! Customer ID: ${customerRes.data.id}`);
-      if (user && user._id && typeof user.save === 'function') {
-        user.abacateCustomerId = customerRes.data.id;
-        await user.save().catch(e => console.warn('Aviso ao salvar abacateCustomerId no user:', e.message));
-      }
-      return { customerId: customerRes.data.id, customerPayload, isExisting: false };
-    } else {
-      lastError = typeof customerRes?.error === 'string' ? customerRes.error : JSON.stringify(customerRes?.error || customerRes);
-      
-      // Se o retorno indicar duplicidade ou cliente existente
-      if (lastError && (lastError.toLowerCase().includes('already exists') || lastError.toLowerCase().includes('já existe') || lastError.toLowerCase().includes('duplicate'))) {
-        const existingId = customerRes?.data?.id || customerRes?.error?.id;
-        if (existingId) {
-          return { customerId: existingId, customerPayload, isExisting: true };
+          return {
+            customerId: matched.id,
+            customerPayload: {
+              name: matched.name || name,
+              email: matched.email || email,
+              taxId: matched.taxId ? matched.taxId.replace(/\D/g, '') : rawCpf,
+              cellphone: matched.cellphone ? matched.cellphone.replace(/\D/g, '') : rawPhone
+            },
+            isExisting: true
+          };
         }
       }
-
-      console.warn(`⚠️ [AbacatePay] Aviso ao criar cliente em /customers/create:`, lastError);
     }
-  } catch (err) {
-    lastError = err.message;
-    console.error(`⚠️ [AbacatePay] Exceção ao registrar cliente:`, err.message);
+  } catch (listErr) {
+    console.warn("⚠️ [AbacatePay] Aviso ao consultar lista de clientes no AbacatePay:", listErr.message);
   }
 
-  return { customerId: undefined, customerPayload, errorDetails: lastError, isExisting: false };
+  // 2. Se o cliente não existe no AbacatePay (ou se o ID gravado no banco era antigo/inválido), TENTA CRIÁ-LO AGORA!
+  let lastError = null;
+  if (name && email && rawCpf && rawPhone) {
+    try {
+      console.log(`⏳ [AbacatePay] Cliente não encontrado no AbacatePay. Registrando novo cliente com CPF (${rawCpf})...`);
+      const customerRes = await abacate.customers.create(customerPayload);
+      if (customerRes && customerRes.success && customerRes.data?.id) {
+        console.log(`✅ [AbacatePay] Novo cliente criado com SUCESSO no AbacatePay! ID: ${customerRes.data.id}`);
+        if (user && user._id && typeof user.save === 'function') {
+          user.abacateCustomerId = customerRes.data.id;
+          await user.save().catch(e => console.warn('Aviso ao atualizar abacateCustomerId:', e.message));
+        }
+        return { customerId: customerRes.data.id, customerPayload, isExisting: false };
+      } else {
+        lastError = typeof customerRes?.error === 'string' ? customerRes.error : JSON.stringify(customerRes?.error || customerRes);
+        if (lastError && (lastError.toLowerCase().includes('already exists') || lastError.toLowerCase().includes('já existe') || lastError.toLowerCase().includes('duplicate'))) {
+          const existingId = customerRes?.data?.id || customerRes?.error?.id;
+          if (existingId) {
+            return { customerId: existingId, customerPayload, isExisting: true };
+          }
+        }
+      }
+    } catch (err) {
+      lastError = err.message;
+      console.error("⚠️ [AbacatePay] Exceção ao registrar novo cliente:", err.message);
+    }
+  } else {
+    console.warn("⚠️ [AbacatePay] Dados incompletos do cliente para criação prévia:", { name, email, rawCpf, rawPhone });
+  }
+
+  // 3. Fallback: Retorna o ID pré-existente (se houver) ou o payload para a tentativa final do checkout
+  return { customerId: existingCustomerId, customerPayload, errorDetails: lastError, isExisting: false };
 };
 
 export const criarClienteAbacate = async (req, res) => {
