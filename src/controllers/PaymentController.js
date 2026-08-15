@@ -244,7 +244,16 @@ export const gerarMensalidade = async (req, res) => {
       if (customerId) chkBody.customerId = customerId;
       else if (customerPayload) chkBody.customer = customerPayload;
 
-      const checkout = await abacate.checkouts.create(chkBody);
+      let checkout = await abacate.checkouts.create(chkBody);
+
+      if (!checkout.success && chkBody.customerId && customerPayload) {
+        const errDetail = typeof checkout.error === 'string' ? checkout.error : JSON.stringify(checkout.error || '');
+        if (errDetail.toLowerCase().includes('customer not found') || errDetail.toLowerCase().includes('not found')) {
+          delete chkBody.customerId;
+          chkBody.customer = customerPayload;
+          checkout = await abacate.checkouts.create(chkBody);
+        }
+      }
 
       if (!checkout.success) {
         return res.status(500).json({ error: 'Erro ao gerar checkout no AbacatePay', details: checkout.error });
@@ -426,7 +435,18 @@ export const gerarPedidoLoja = async (req, res) => {
     if (customerId) chkBody.customerId = customerId;
     else if (customerPayload) chkBody.customer = customerPayload;
 
-    const checkout = await abacate.checkouts.create(chkBody);
+    let checkout = await abacate.checkouts.create(chkBody);
+
+    // Fallback de segurança: Se o customerId salvo no banco não existir no AbacatePay (ex: chave de API ou ambiente alterado), tenta recriar com os dados do cliente
+    if (!checkout.success && chkBody.customerId && customerPayload) {
+      const errDetail = typeof checkout.error === 'string' ? checkout.error : JSON.stringify(checkout.error || '');
+      if (errDetail.toLowerCase().includes('customer not found') || errDetail.toLowerCase().includes('not found')) {
+        console.warn(`⚠️ [AbacatePay] customerId '${chkBody.customerId}' não encontrado no AbacatePay. Recriando checkout com payload completo do cliente...`);
+        delete chkBody.customerId;
+        chkBody.customer = customerPayload;
+        checkout = await abacate.checkouts.create(chkBody);
+      }
+    }
 
     if (!checkout.success) {
       return res.status(500).json({ error: 'Erro ao gerar checkout da lojinha', details: checkout.error });

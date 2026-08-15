@@ -92,7 +92,18 @@ export const processCheckoutWorker = async (req, res) => {
       else chkBody.customer = customer;
     }
 
-    const checkoutRes = await abacate.checkouts.create(chkBody);
+    let checkoutRes = await abacate.checkouts.create(chkBody);
+
+    if (!checkoutRes.success && chkBody.customerId && customer) {
+      const errDetail = typeof checkoutRes.error === 'string' ? checkoutRes.error : JSON.stringify(checkoutRes.error || '');
+      if (errDetail.toLowerCase().includes('customer not found') || errDetail.toLowerCase().includes('not found')) {
+        console.warn(`⚠️ [QStash Worker] customerId '${chkBody.customerId}' expirado. Recriando com dados cadastrais...`);
+        delete chkBody.customerId;
+        chkBody.customer = customer;
+        checkoutRes = await abacate.checkouts.create(chkBody);
+      }
+    }
+
     if (!checkoutRes.success || !checkoutRes.data) {
       throw new Error(`Erro ao criar checkout no AbacatePay: ${JSON.stringify(checkoutRes.error)}`);
     }
