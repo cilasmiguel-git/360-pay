@@ -5,12 +5,13 @@ dotenv.config();
 
 // Opções de conexão altamente otimizadas para ambiente Serverless (Vercel)
 const connOptions = {
-  maxPoolSize: 10,                // Limita sockets por instância Serverless (evita estourar limite do Atlas)
-  minPoolSize: 0,                 // Não mantém sockets ociosos no congelamento da função
-  serverSelectionTimeoutMS: 5000, // Fala rápido (5s) em caso de oscilação em vez de pendurar a requisição
+  maxPoolSize: 10,                 // Limita sockets por instância Serverless (evita estourar limite do Atlas)
+  minPoolSize: 0,                  // Não mantém sockets ociosos no congelamento da função
+  serverSelectionTimeoutMS: 15000, // Dá tempo suficiente (15s) para o Cold Start da Vercel conectar ao Atlas
   socketTimeoutMS: 45000,          // Fecha sockets inativos automaticamente
-  connectTimeoutMS: 10000,
-  bufferCommands: false,          // Evita que queries fiquem travadas por 10s se o DB estiver desconectado
+  connectTimeoutMS: 15000,
+  bufferCommands: false,           // Evita que queries fiquem travadas se o DB estiver desconectado
+  family: 4,                       // Força IPv4 para evitar timeouts de DNS IPv6 na Vercel (AWS Lambda)
 };
 
 // Caching estático das conexões no escopo global (Vercel Serverless)
