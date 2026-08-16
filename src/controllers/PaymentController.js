@@ -550,6 +550,24 @@ export const webhookAbacatePay = async (req, res) => {
       } else {
         console.warn(`⚠️ [Webhook AbacatePay] Nenhuma fatura encontrada no banco com abacatepayCheckoutId '${checkoutId}'.`);
       }
+
+      // Sincroniza com o Backend Principal (Lojinha) para atualizar o pedido e dar baixa no estoque
+      const mainBackendUrl = (process.env.MAIN_BACKEND_URL || 'https://api.educacaoalternativa360.com.br').replace(/\/+$/, '');
+      try {
+        console.log(`📡 [Webhook AbacatePay] Notificando Backend Principal (${mainBackendUrl}/api/store/webhook-payment) com Checkout ID '${checkoutId}'...`);
+        const notifyRes = await fetch(`${mainBackendUrl}/api/store/webhook-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            faturaId: checkoutId,
+            status: 'PAID'
+          })
+        });
+        const notifyData = await notifyRes.json().catch(() => ({}));
+        console.log('✅ [Webhook AbacatePay] Resposta da baixa no Backend Principal:', notifyData);
+      } catch (syncErr) {
+        console.warn('⚠️ [Webhook AbacatePay] Erro ao notificar o Backend Principal:', syncErr.message);
+      }
     } 
     // 3. Processa eventos de Cancelamento ou Expiração
     else if (eventType === 'checkout.cancelled' || eventType === 'billing.cancelled' || paymentStatus === 'CANCELLED') {
