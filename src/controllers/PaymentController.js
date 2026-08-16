@@ -392,9 +392,10 @@ export const gerarPedidoLoja = async (req, res) => {
     }
 
     const valorTotal = itens.reduce((acc, item) => acc + (item.preco * item.quantidade), 0);
-    // Repasse da taxa de 3,5% do AbacatePay via cálculo proporcional (Gross-Up)
-    const valorComTaxa = calcularValorComTaxaAbacate(valorTotal, 3.5);
-    const valorCentavos = Math.round(valorComTaxa * 100);
+    // Repasse da taxa de 3,5% do AbacatePay via Gross-Up apenas para pagamento no Cartão de Crédito (CARD)
+    const isCardOnly = Array.isArray(methods) && methods.includes('CARD') && !methods.includes('PIX');
+    const valorFinal = isCardOnly ? calcularValorComTaxaAbacate(valorTotal, 3.5) : valorTotal;
+    const valorCentavos = Math.round(valorFinal * 100);
 
     const abacate = getAbacate();
 
@@ -481,7 +482,7 @@ export const gerarPedidoLoja = async (req, res) => {
       origemCobranca: 'loja',
       descricao: descricaoPedido || 'Pedido Lojinha',
       valorOriginal: valorTotal,
-      valorComDesconto: Number(valorComTaxa.toFixed(2)),
+      valorComDesconto: Number(valorFinal.toFixed(2)),
       vencimento: new Date(new Date().setDate(new Date().getDate() + 3)), // Vence em 3 dias
       tenantId: user.tenantId,
       status: 'PENDING',
@@ -505,26 +506,71 @@ export const gerarPedidoLoja = async (req, res) => {
 
 export const webhookAbacatePay = async (req, res) => {
   try {
-    const event = req.body;
-    
-    // TODO: Adicionar validação de assinatura (X-Webhook-Signature) do AbacatePay.
-    console.log('Webhook recebido:', event);
+    const event = req.body || {};
+    const expectedSecret = process.env.ABACATEPAY_WEBHOOK_SECRET;
 
-    // Supondo que o evento possua a estrutura { type: 'checkout.paid', data: { id: 'chk_123' } }
-    if (event.type === 'checkout.paid') {
-      const checkoutId = event.data.id;
-      
-      const fatura = await Fatura.findOne({ abacatepayCheckoutId: checkoutId });
-      if (fatura) {
-        fatura.status = 'PAID';
-        await fatura.save();
-        console.log(`Fatura ${fatura._id} marcada como PAGA!`);
+    // 1. Validação de Segurança do Secret do Webhook
+    if (expectedSecret) {
+      const incomingSecret =
+        req.query?.secret ||
+        req.headers['x-webhook-secret'] ||
+        req.headers['x-abacatepay-secret'] ||
+        req.headers['secret'] ||
+        (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null);
+
+      if (incomingSecret !== expectedSecret) {
+        console.warn('⚠️ [Webhook] Tentativa de acesso com secret inválido:', { incomingSecret });
+        return res.status(401).json({ error: 'Secret de webhook inválido ou não autorizado.' });
       }
     }
 
-    res.status(200).send('Webhook processado');
+    console.log('📥 [Webhook AbacatePay] Evento recebido com sucesso:', JSON.stringify(event, null, 2));
+
+    const eventType = event.event || event.type || '';
+    const checkoutData = event.data || {};
+    const checkoutId = checkoutData.id || checkoutData._id || checkoutData.checkoutId || event.id;
+    const paymentStatus = checkoutData.status || '';
+
+    if (!checkoutId) {
+      console.warn('⚠️ [Webhook] Nenhum ID de checkout/cobrança encontrado no evento.');
+      return res.status(200).json({ success: true, message: 'Evento recebido sem ID de checkout para processar.' });
+    }
+
+    // 2. Processa os eventos de Pagamento Concluído (PAID)
+    if (eventType === 'checkout.paid' || eventType === 'billing.paid' || eventType === 'payment.paid' || paymentStatus === 'PAID') {
+      const fatura = await Fatura.findOne({ abacatepayCheckoutId: checkoutId });
+      if (fatura) {
+        if (fatura.status !== 'PAID') {
+          fatura.status = 'PAID';
+          await fatura.save();
+          console.log(`✅ [Webhook AbacatePay] Fatura ${fatura._id} (Checkout ID: ${checkoutId}) foi atualizada para PAID!`);
+        } else {
+          console.log(`ℹ️ [Webhook AbacatePay] Fatura ${fatura._id} já estava marcada como PAID.`);
+        }
+      } else {
+        console.warn(`⚠️ [Webhook AbacatePay] Nenhuma fatura encontrada no banco com abacatepayCheckoutId '${checkoutId}'.`);
+      }
+    } 
+    // 3. Processa eventos de Cancelamento ou Expiração
+    else if (eventType === 'checkout.cancelled' || eventType === 'billing.cancelled' || paymentStatus === 'CANCELLED') {
+      const fatura = await Fatura.findOne({ abacatepayCheckoutId: checkoutId });
+      if (fatura && fatura.status !== 'CANCELLED') {
+        fatura.status = 'CANCELLED';
+        await fatura.save();
+        console.log(`🚫 [Webhook AbacatePay] Fatura ${fatura._id} atualizada para CANCELLED.`);
+      }
+    } else if (eventType === 'checkout.expired' || eventType === 'billing.expired' || paymentStatus === 'EXPIRED') {
+      const fatura = await Fatura.findOne({ abacatepayCheckoutId: checkoutId });
+      if (fatura && fatura.status !== 'EXPIRED') {
+        fatura.status = 'EXPIRED';
+        await fatura.save();
+        console.log(`⏰ [Webhook AbacatePay] Fatura ${fatura._id} atualizada para EXPIRED.`);
+      }
+    }
+
+    return res.status(200).json({ success: true, message: 'Webhook processado com sucesso' });
   } catch (error) {
-    console.error(error);
-    res.status(500).send('Erro no processamento do webhook');
+    console.error('❌ [Webhook AbacatePay] Erro de processamento:', error);
+    return res.status(500).json({ error: error.message || 'Erro interno ao processar webhook' });
   }
 };
