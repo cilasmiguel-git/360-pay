@@ -168,7 +168,7 @@ export const gerarMensalidade = async (req, res) => {
     const valorComDesconto = user.aplicarDescontoMensalidade(valorBaseMensalidade);
     const valorCentavos = Math.round(valorComDesconto * 100);
     const abacate = getAbacate();
-    
+
     // 1. Cria o Produto na AbacatePay
     const produtoPayload = {
       externalId: `mensalidade_${user._id}_${Date.now()}`,
@@ -524,11 +524,9 @@ export const webhookAbacatePay = async (req, res) => {
 
     // Se o secret foi informado na URL ou header customizado (ex: ?secret=MINHA_CHAVE)
     if (customSecret) {
-      const isCustomSecretValid = 
-        (expectedSecret && customSecret === expectedSecret) || 
-        (apiKey && customSecret === apiKey) ||
-        customSecret === 'sec_webhook_abacatepay_360pay_v2_2026' ||
-        customSecret === '360pay_abacatepay_webhook_secret_key_2026_prod';
+      const isCustomSecretValid =
+        (expectedSecret && customSecret === expectedSecret) ||
+        (apiKey && customSecret === apiKey);
 
       if (!isCustomSecretValid) {
         console.warn('⚠️ [Webhook] Tentativa de acesso com secret customizado inválido:', { receivedSecret: customSecret });
@@ -538,8 +536,8 @@ export const webhookAbacatePay = async (req, res) => {
         });
       }
     } else if (authHeader) {
-      const isAuthHeaderValid = 
-        (apiKey && authHeader === apiKey.trim()) || 
+      const isAuthHeaderValid =
+        (apiKey && authHeader === apiKey.trim()) ||
         (expectedSecret && authHeader === expectedSecret.trim());
 
       if (!isAuthHeaderValid) {
@@ -553,45 +551,53 @@ export const webhookAbacatePay = async (req, res) => {
 
     const eventTypeUpper = String(event.event || event.type || event.action || '').toUpperCase();
     const checkoutData = event.data || {};
-    const checkoutId = 
-      checkoutData.id || 
-      checkoutData._id || 
-      checkoutData.checkoutId || 
-      checkoutData.billingId || 
-      event.id || 
-      event.checkoutId || 
+    const checkoutObj = checkoutData.checkout || checkoutData.billing || checkoutData;
+
+    const checkoutId =
+      checkoutObj.id ||
+      checkoutObj._id ||
+      checkoutObj.checkoutId ||
+      checkoutObj.billingId ||
+      checkoutData.id ||
+      checkoutData._id ||
+      checkoutData.checkoutId ||
+      checkoutData.billingId ||
+      event.id ||
+      event.checkoutId ||
       event.billingId;
 
-    const paymentStatusUpper = String(checkoutData.status || event.status || '').toUpperCase();
+    const paymentStatusUpper = String(checkoutObj.status || checkoutData.status || event.status || '').toUpperCase();
 
     if (!checkoutId) {
-      console.warn('⚠️ [Webhook] Nenhum ID de checkout/cobrança encontrado no evento.');
+      console.warn('⚠️ [Webhook] Nenhum ID de checkout/cobrança encontrado no evento:', JSON.stringify(event, null, 2));
       return res.status(200).json({ success: true, message: 'Evento recebido sem ID de checkout para processar.' });
     }
 
-    const isPaid = 
-      eventTypeUpper.includes('PAID') || 
-      eventTypeUpper.includes('PAGO') || 
-      paymentStatusUpper.includes('PAID') || 
-      paymentStatusUpper.includes('PAGO');
+    const isPaid =
+      eventTypeUpper.includes('PAID') ||
+      eventTypeUpper.includes('PAGO') ||
+      eventTypeUpper.includes('COMPLETED') ||
+      paymentStatusUpper.includes('PAID') ||
+      paymentStatusUpper.includes('PAGO') ||
+      paymentStatusUpper.includes('COMPLETED');
 
-    const isCancelled = 
-      eventTypeUpper.includes('CANCEL') || 
+    const isCancelled =
+      eventTypeUpper.includes('CANCEL') ||
       paymentStatusUpper.includes('CANCEL');
 
-    const isExpired = 
-      eventTypeUpper.includes('EXPIRE') || 
+    const isExpired =
+      eventTypeUpper.includes('EXPIRE') ||
       paymentStatusUpper.includes('EXPIRE');
 
     // 2. Processa os eventos de Pagamento Concluído (PAID)
     if (isPaid) {
-      const fatura = await Fatura.findOne({ 
+      const fatura = await Fatura.findOne({
         $or: [
           { abacatepayCheckoutId: checkoutId },
           { abacatepayPaymentUrl: { $regex: checkoutId, $options: 'i' } }
         ]
       });
-      
+
       if (fatura) {
         if (fatura.status !== 'PAID') {
           fatura.status = 'PAID';
@@ -622,7 +628,7 @@ export const webhookAbacatePay = async (req, res) => {
       } catch (syncErr) {
         console.warn('⚠️ [Webhook AbacatePay] Erro ao notificar o Backend Principal:', syncErr.message);
       }
-    } 
+    }
     // 3. Processa eventos de Cancelamento ou Expiração
     else if (isCancelled) {
       const fatura = await Fatura.findOne({ abacatepayCheckoutId: checkoutId });
