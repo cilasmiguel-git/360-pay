@@ -508,31 +508,43 @@ export const webhookAbacatePay = async (req, res) => {
   try {
     const event = req.body || {};
     const expectedSecret = process.env.ABACATEPAY_WEBHOOK_SECRET;
+    const apiKey = process.env.ABACATEPAY_API_KEY;
 
-    // 1. Validação de Segurança do Secret do Webhook
-    if (expectedSecret) {
-      const incomingSecret =
-        req.query?.secret ||
-        req.query?.webhookSecret ||
-        req.headers['x-webhook-secret'] ||
-        req.headers['x-abacatepay-secret'] ||
-        req.headers['secret'] ||
-        (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null);
+    // 1. Validação Flexível e Segura do Secret do Webhook
+    const customSecret =
+      req.query?.secret ||
+      req.query?.webhookSecret ||
+      req.headers['x-webhook-secret'] ||
+      req.headers['x-abacatepay-secret'] ||
+      req.headers['secret'];
 
-      if (incomingSecret && incomingSecret !== expectedSecret) {
-        console.warn('⚠️ [Webhook] Tentativa de acesso com secret inválido:', {
-          receivedSecret: incomingSecret,
-          query: req.query
-        });
+    const authHeader = req.headers['authorization']
+      ? req.headers['authorization'].replace(/^Bearer\s+/i, '').trim()
+      : null;
+
+    // Se o secret foi informado na URL ou header customizado (ex: ?secret=MINHA_CHAVE)
+    if (customSecret) {
+      const isCustomSecretValid = 
+        (expectedSecret && customSecret === expectedSecret) || 
+        (apiKey && customSecret === apiKey);
+
+      if (!isCustomSecretValid) {
+        console.warn('⚠️ [Webhook] Tentativa de acesso com secret customizado inválido:', { receivedSecret: customSecret });
         return res.status(401).json({
           error: 'Secret de webhook inválido ou não autorizado.',
-          hint: 'O secret informado na URL/header do Webhook não corresponde à variável ABACATEPAY_WEBHOOK_SECRET do servidor.'
+          hint: 'O secret informado na URL do Webhook não corresponde às chaves ativas do servidor.'
         });
       }
+    } else if (authHeader) {
+      const isAuthHeaderValid = 
+        (apiKey && authHeader === apiKey.trim()) || 
+        (expectedSecret && authHeader === expectedSecret.trim());
 
-      if (!incomingSecret) {
-        console.warn('⚠️ [Webhook] Secret não foi enviado na requisição (URL no Dashboard do AbacatePay sem ?secret=...). Aceitando processamento do evento por segurança de entrega.');
+      if (!isAuthHeaderValid) {
+        console.warn('⚠️ [Webhook] Header Authorization recebido não confere com a API Key:', authHeader);
       }
+    } else {
+      console.log('ℹ️ [Webhook] Recebido evento do gateway. Processando requisição...');
     }
 
     console.log('📥 [Webhook AbacatePay] Evento recebido com sucesso:', JSON.stringify(event, null, 2));
