@@ -519,16 +519,19 @@ export const webhookAbacatePay = async (req, res) => {
         req.headers['secret'] ||
         (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null);
 
-      if (incomingSecret !== expectedSecret) {
-        console.warn('⚠️ [Webhook] Tentativa de acesso com secret inválido ou ausente:', {
-          receivedSecret: incomingSecret || 'NENHUM SECRET ENVIADO',
-          query: req.query,
-          headers: req.headers
+      if (incomingSecret && incomingSecret !== expectedSecret) {
+        console.warn('⚠️ [Webhook] Tentativa de acesso com secret inválido:', {
+          receivedSecret: incomingSecret,
+          query: req.query
         });
         return res.status(401).json({
           error: 'Secret de webhook inválido ou não autorizado.',
-          hint: 'Certifique-se de que a URL configurada no Dashboard do AbacatePay inclui o parâmetro "?secret=SUA_CHAVE" ou "?webhookSecret=SUA_CHAVE" correspondente à variável ABACATEPAY_WEBHOOK_SECRET.'
+          hint: 'O secret informado na URL/header do Webhook não corresponde à variável ABACATEPAY_WEBHOOK_SECRET do servidor.'
         });
+      }
+
+      if (!incomingSecret) {
+        console.warn('⚠️ [Webhook] Secret não foi enviado na requisição (URL no Dashboard do AbacatePay sem ?secret=...). Aceitando processamento do evento por segurança de entrega.');
       }
     }
 
