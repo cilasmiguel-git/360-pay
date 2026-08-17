@@ -513,32 +513,68 @@ export const webhookAbacatePay = async (req, res) => {
     if (expectedSecret) {
       const incomingSecret =
         req.query?.secret ||
+        req.query?.webhookSecret ||
         req.headers['x-webhook-secret'] ||
         req.headers['x-abacatepay-secret'] ||
         req.headers['secret'] ||
         (req.headers['authorization'] ? req.headers['authorization'].replace(/^Bearer\s+/i, '') : null);
 
       if (incomingSecret !== expectedSecret) {
-        console.warn('⚠️ [Webhook] Tentativa de acesso com secret inválido:', { incomingSecret });
-        return res.status(401).json({ error: 'Secret de webhook inválido ou não autorizado.' });
+        console.warn('⚠️ [Webhook] Tentativa de acesso com secret inválido ou ausente:', {
+          receivedSecret: incomingSecret || 'NENHUM SECRET ENVIADO',
+          query: req.query,
+          headers: req.headers
+        });
+        return res.status(401).json({
+          error: 'Secret de webhook inválido ou não autorizado.',
+          hint: 'Certifique-se de que a URL configurada no Dashboard do AbacatePay inclui o parâmetro "?secret=SUA_CHAVE" ou "?webhookSecret=SUA_CHAVE" correspondente à variável ABACATEPAY_WEBHOOK_SECRET.'
+        });
       }
     }
 
     console.log('📥 [Webhook AbacatePay] Evento recebido com sucesso:', JSON.stringify(event, null, 2));
 
-    const eventType = event.event || event.type || '';
+    const eventTypeUpper = String(event.event || event.type || event.action || '').toUpperCase();
     const checkoutData = event.data || {};
-    const checkoutId = checkoutData.id || checkoutData._id || checkoutData.checkoutId || event.id;
-    const paymentStatus = checkoutData.status || '';
+    const checkoutId = 
+      checkoutData.id || 
+      checkoutData._id || 
+      checkoutData.checkoutId || 
+      checkoutData.billingId || 
+      event.id || 
+      event.checkoutId || 
+      event.billingId;
+
+    const paymentStatusUpper = String(checkoutData.status || event.status || '').toUpperCase();
 
     if (!checkoutId) {
       console.warn('⚠️ [Webhook] Nenhum ID de checkout/cobrança encontrado no evento.');
       return res.status(200).json({ success: true, message: 'Evento recebido sem ID de checkout para processar.' });
     }
 
+    const isPaid = 
+      eventTypeUpper.includes('PAID') || 
+      eventTypeUpper.includes('PAGO') || 
+      paymentStatusUpper.includes('PAID') || 
+      paymentStatusUpper.includes('PAGO');
+
+    const isCancelled = 
+      eventTypeUpper.includes('CANCEL') || 
+      paymentStatusUpper.includes('CANCEL');
+
+    const isExpired = 
+      eventTypeUpper.includes('EXPIRE') || 
+      paymentStatusUpper.includes('EXPIRE');
+
     // 2. Processa os eventos de Pagamento Concluído (PAID)
-    if (eventType === 'checkout.paid' || eventType === 'billing.paid' || eventType === 'payment.paid' || paymentStatus === 'PAID') {
-      const fatura = await Fatura.findOne({ abacatepayCheckoutId: checkoutId });
+    if (isPaid) {
+      const fatura = await Fatura.findOne({ 
+        $or: [
+          { abacatepayCheckoutId: checkoutId },
+          { abacatepayPaymentUrl: { $regex: checkoutId, $options: 'i' } }
+        ]
+      });
+      
       if (fatura) {
         if (fatura.status !== 'PAID') {
           fatura.status = 'PAID';
@@ -560,7 +596,8 @@ export const webhookAbacatePay = async (req, res) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             faturaId: checkoutId,
-            status: 'PAID'
+            status: 'PAID',
+            data: checkoutData
           })
         });
         const notifyData = await notifyRes.json().catch(() => ({}));
@@ -570,14 +607,14 @@ export const webhookAbacatePay = async (req, res) => {
       }
     } 
     // 3. Processa eventos de Cancelamento ou Expiração
-    else if (eventType === 'checkout.cancelled' || eventType === 'billing.cancelled' || paymentStatus === 'CANCELLED') {
+    else if (isCancelled) {
       const fatura = await Fatura.findOne({ abacatepayCheckoutId: checkoutId });
       if (fatura && fatura.status !== 'CANCELLED') {
         fatura.status = 'CANCELLED';
         await fatura.save();
         console.log(`🚫 [Webhook AbacatePay] Fatura ${fatura._id} atualizada para CANCELLED.`);
       }
-    } else if (eventType === 'checkout.expired' || eventType === 'billing.expired' || paymentStatus === 'EXPIRED') {
+    } else if (isExpired) {
       const fatura = await Fatura.findOne({ abacatepayCheckoutId: checkoutId });
       if (fatura && fatura.status !== 'EXPIRED') {
         fatura.status = 'EXPIRED';
